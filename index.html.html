@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>קופה</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#f5f0e8;font-family:'Segoe UI','Arial Hebrew',Arial,sans-serif;direction:rtl;}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.spin{animation:spin .8s linear infinite}
+.fade{animation:fadeIn .25s ease}
+.lift:active{transform:scale(.98)}
+input:focus,select:focus,textarea:focus{border-color:#c8853a!important;outline:none}
+button:disabled{opacity:.6}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useRef}=React;
+
+// ─── Firebase ────────────────────────────────────────────────
+const FB   ="https://villa-budget-8fa87-default-rtdb.firebaseio.com";
+const furl = p=>`${FB}/${p}.json`;
+const fbGet  =async p=>{const r=await fetch(furl(p));if(!r.ok)throw new Error();return r.json();};
+const fbSet  =async(p,d)=>{const r=await fetch(furl(p),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)});if(!r.ok)throw new Error();return r.json();};
+const fbPush =async(p,d)=>{const r=await fetch(furl(p),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)});if(!r.ok)throw new Error();return r.json();};
+const fbDel  =async p=>fetch(furl(p),{method:"DELETE"});
+
+// ─── Config ──────────────────────────────────────────────────
+const SUPER_PIN="kupa2025";
+
+const PROJ_TYPES={
+  vacation:{label:"🏖️ חופשה / וילה",   color:"#c8853a",cats:["🏠 לינה","🍽️ אוכל","🎢 פעילויות","⛽ נסיעות","🎉 שונות"]},
+  event:   {label:"🎉 אירוע / חגיגה",   color:"#8e44ad",cats:["🏛️ מקום","🍽️ קייטרינג","🎊 עיצוב","🎵 מוזיקה","🎉 שונות"]},
+  construction:{label:"🔨 בנייה / שיפוץ",color:"#27ae60",cats:["🧱 חומרים","👷 עבודה","📐 תכנון","📋 היתרים","🔧 שונות"]},
+  trip:    {label:"✈️ טיול קבוצתי",     color:"#2980b9",cats:["✈️ טיסות","🏨 לינה","🍽️ אוכל","🗺️ סיורים","🚌 תחבורה","🎒 שונות"]},
+  custom:  {label:"⚙️ מותאם אישית",     color:"#7f8c8d",cats:["📦 כללי","🎉 שונות"]},
+};
+const SPLIT_MODES=[
+  {id:"equal",   label:"חלקים שווים"},
+  {id:"persons", label:"לפי נפשות"},
+  {id:"weighted",label:"נפשות × ימים"},
+];
+
+// ─── Styles ──────────────────────────────────────────────────
+const G=(c="#c8853a")=>`linear-gradient(135deg,${c},${c}cc)`;
+const S={
+  app:  {minHeight:"100vh",background:"#f5f0e8"},
+  ctr:  {display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",height:"100vh",background:"#f5f0e8"},
+  sp:   {width:36,height:36,border:"3px solid #d4a96a",borderTopColor:"transparent",borderRadius:"50%"},
+  card: {background:"white",borderRadius:14,padding:14,marginBottom:10,boxShadow:"0 2px 10px rgba(0,0,0,.06)"},
+  inp:  {border:"2px solid #ede0cc",borderRadius:9,padding:"9px 10px",fontSize:13,background:"#fafafa",width:"100%",marginBottom:8},
+  sel:  {border:"2px solid #ede0cc",borderRadius:9,padding:"9px 10px",fontSize:13,background:"#fafafa",width:"100%",marginBottom:8},
+  ta:   {border:"2px solid #ede0cc",borderRadius:9,padding:"9px 10px",fontSize:13,background:"#fafafa",width:"100%",marginBottom:8,resize:"none"},
+  row:  {display:"flex",gap:8,marginBottom:8,alignItems:"center"},
+  lbl:  {fontSize:11,color:"#888",marginBottom:4,fontWeight:600,display:"block"},
+  err:  {color:"#e74c3c",fontSize:12,textAlign:"center",marginBottom:6},
+  ov:   {position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",justifyContent:"center",alignItems:"center",zIndex:100,padding:12},
+  mod:  {background:"white",borderRadius:18,padding:18,width:"100%",maxWidth:420,maxHeight:"90vh",overflowY:"auto"},
+  del:  {background:"none",border:"none",color:"#ddd",fontSize:12,cursor:"pointer",padding:"3px 5px",flexShrink:0},
+  pri:  (c="#c8853a")=>({width:"100%",background:G(c),color:"white",border:"none",borderRadius:11,padding:12,fontSize:14,fontWeight:700,cursor:"pointer",marginTop:4}),
+  sec:  (c="#3498db")=>({width:"100%",background:c+"22",color:c,border:"none",borderRadius:11,padding:10,fontSize:13,fontWeight:600,cursor:"pointer",marginTop:5}),
+  gho:  {width:"100%",background:"transparent",border:"2px dashed #d4a96a",color:"#c8853a",borderRadius:9,padding:9,fontSize:13,fontWeight:600,cursor:"pointer",marginTop:4},
+  pill: c=>({background:c+"22",color:c,padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:600,display:"inline-block"}),
+};
+
+// ─── Calc ────────────────────────────────────────────────────
+function calc(proj,expenses,deposits){
+  const members=proj?.members||[];
+  const expList=Object.entries(expenses||{}).sort((a,b)=>(b[1].ts||0)-(a[1].ts||0));
+  const depList=Object.entries(deposits||{});
+  const w=m=>proj.splitMode==="equal"?1:proj.splitMode==="persons"?(m.persons||1):(m.persons||1)*((m.days||proj.totalDays||1)/(proj.totalDays||1));
+  const totalW=members.reduce((s,m)=>s+w(m),0);
+  const totalSh=expList.filter(([,e])=>e.shared&&e.type!=="refund").reduce((s,[,e])=>s+e.amount,0);
+  const cpu=totalW>0?totalSh/totalW:0;
+  const mDep =m=>depList.filter(([,d])=>d.member===m.id).reduce((s,[,d])=>s+d.amount,0);
+  const mPriv=m=>expList.filter(([,e])=>e.paidBy===m.id&&e.source==="private"&&e.shared&&e.type!=="refund").reduce((s,[,e])=>s+e.amount,0);
+  const mRef =m=>expList.filter(([,e])=>e.type==="refund"&&e.memberId===m.id).reduce((s,[,e])=>s+e.amount,0);
+  const mShare=m=>cpu*w(m);
+  const mContrib=m=>mDep(m)+mPriv(m);
+  const mBal=m=>mContrib(m)-mShare(m)-mRef(m);
+  const totDep=depList.reduce((s,[,d])=>s+d.amount,0);
+  const envExp=expList.filter(([,e])=>e.source==="envelope"&&e.shared&&e.type!=="refund").reduce((s,[,e])=>s+e.amount,0);
+  const refGiven=expList.filter(([,e])=>e.type==="refund").reduce((s,[,e])=>s+e.amount,0);
+  const envBal=totDep-envExp-refGiven;
+  const projRef=members.reduce((s,m)=>{const b=mBal(m);return s+(b>0?b:0);},0);
+  return{members,expList,depList,totalSh,cpu,totalW,w,mDep,mPriv,mRef,mShare,mContrib,mBal,
+    envBal,totDep,envExp,refGiven,projRef,netAv:envBal-projRef,shortfall:totalSh-totDep};
+}
+
+// ─── Generate access code ────────────────────────────────────
+function genCode(){
+  const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from({length:8},()=>chars[Math.floor(Math.random()*chars.length)]).join("");
+}
+
+// ════════════════════════════════════════════════════════════
+function App(){
+  const [loading,setLoading]=useState(true);
+  const [screen, setScreen] =useState("login"); // login|super|code-entry|setup|project
+  const [projects,setProjects]=useState({});
+  const [codes,   setCodes]  =useState({});     // {code:{used,projId,createdAt}}
+  const [activeId,setActiveId]=useState(null);
+  const [expenses,setExpenses]=useState({});
+  const [deposits,setDeposits]=useState({});
+  const [saving,  setSaving] =useState(false);
+  const [connErr, setConnErr]=useState("");
+
+  // Auth
+  const [pinInput,setPinInput]=useState("");
+  const [pinErr,  setPinErr]  =useState("");
+  const [codeInput,setCodeInput]=useState("");
+  const [codeErr,  setCodeErr] =useState("");
+
+  // Modals
+  const [refModal,   setRefModal]  =useState(false);
+  const [editMModal, setEditMModal]=useState(false);
+  const [feedbackM,  setFeedbackM] =useState(false);
+  const [reportM,    setReportM]   =useState(false);
+  const [analyticsM, setAnalyticsM]=useState(false);
+
+  // Project view
+  const [pView,setPView]=useState("expenses");
+  const [exp,setExp]=useState({paidBy:"",amount:"",cat:"",note:"",shared:true,source:"envelope"});
+  const [dep,setDep]=useState({member:"",amount:""});
+  const [ref,setRef]=useState({memberId:"",amount:"",note:""});
+
+  // ── Load ──────────────────────────────────────────────────
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const data=await fbGet("kupa3");
+        setProjects(data?.projects||{});
+        setCodes(data?.codes||{});
+      }catch{setConnErr("שגיאת חיבור");}
+      setLoading(false);
+    })();
+  },[]);
+
+  const loadProject=useCallback(async id=>{
+    try{
+      const[e,d]=await Promise.all([fbGet(`kupa3_exp/${id}`),fbGet(`kupa3_dep/${id}`)]);
+      setExpenses(e||{});setDeposits(d||{});
+    }catch{}
+  },[]);
+
+  useEffect(()=>{
+    if(!activeId)return;
+    loadProject(activeId);
+    const id=setInterval(()=>loadProject(activeId),6000);
+    return()=>clearInterval(id);
+  },[activeId,loadProject]);
+
+  // ── Super admin login ────────────────────────────────────
+  const superLogin=()=>{
+    if(pinInput===SUPER_PIN){setScreen("super");setPinInput("");setPinErr("");}
+    else{setPinErr("קוד שגוי");setPinInput("");}
+  };
+
+  // ── Generate code ────────────────────────────────────────
+  const generateCode=async()=>{
+    const code=genCode();
+    const newCodes={...codes,[code]:{used:false,createdAt:Date.now()}};
+    await fbSet("kupa3/codes",newCodes);
+    setCodes(newCodes);
+    return code;
+  };
+
+  // ── Code entry (group admin) ─────────────────────────────
+  const enterCode=async()=>{
+    const c=codeInput.trim().toUpperCase();
+    if(!codes[c]){setCodeErr("קוד לא נמצא");return;}
+    if(codes[c].used){
+      // Code already used — go to project
+      const projId=codes[c].projId;
+      if(projId&&projects[projId]){
+        setActiveId(projId);setPView("expenses");setScreen("project");
+      }else{setCodeErr("הקוד שומש אך הפרויקט לא נמצא");}
+      return;
+    }
+    // Fresh code — go to setup
+    setCodeInput(c);setCodeErr("");setScreen("setup");
+  };
+
+  // ── Create project (group admin) ─────────────────────────
+  const createProject=async proj=>{
+    const id="p"+Date.now();
+    const newP={...proj,id,createdAt:Date.now(),status:"active",accessCode:codeInput};
+    const updP={...projects,[id]:newP};
+    const updC={...codes,[codeInput]:{...codes[codeInput],used:true,projId:id}};
+    await fbSet("kupa3/projects",updP);
+    await fbSet("kupa3/codes",updC);
+    setProjects(updP);setCodes(updC);
+    setActiveId(id);setPView("expenses");setScreen("project");
+  };
+
+  // ── Update project ───────────────────────────────────────
+  const updateProject=async(id,patch)=>{
+    const updP={...projects,[id]:{...projects[id],...patch}};
+    await fbSet("kupa3/projects",updP);
+    setProjects(updP);
+  };
+
+  // ── Archive/delete ───────────────────────────────────────
+  const archiveProject=async id=>{await updateProject(id,{status:"archived"});};
+  const deleteProject =async id=>{
+    const n={...projects};delete n[id];
+    await fbSet("kupa3/projects",n);
+    await fbDel(`kupa3_exp/${id}`);await fbDel(`kupa3_dep/${id}`);
+    setProjects(n);
+  };
+
+  // ── Expenses ─────────────────────────────────────────────
+  const addExpense=async()=>{
+    if(!exp.paidBy||!exp.amount||isNaN(+exp.amount))return;
+    const item={paidBy:exp.paidBy,amount:+exp.amount,cat:exp.cat||"כללי",
+      note:exp.note,shared:exp.shared,source:exp.source,type:"expense",
+      ts:Date.now(),time:new Date().toLocaleTimeString("he-IL",{hour:"2-digit",minute:"2-digit"})};
+    setSaving(true);
+    try{
+      const{name}=await fbPush(`kupa3_exp/${activeId}`,item);
+      setExpenses(p=>({...p,[name]:item}));
+      setExp({paidBy:"",amount:"",cat:"",note:"",shared:true,source:"envelope"});
+    }catch{setConnErr("שגיאה");}finally{setSaving(false);}
+  };
+  const delExp=async k=>{await fbDel(`kupa3_exp/${activeId}/${k}`);setExpenses(p=>{const n={...p};delete n[k];return n;});};
+
+  // ── Deposits ─────────────────────────────────────────────
+  const addDeposit=async()=>{
+    if(!dep.member||!dep.amount)return;
+    const item={member:dep.member,amount:+dep.amount,ts:Date.now()};
+    setSaving(true);
+    try{
+      const{name}=await fbPush(`kupa3_dep/${activeId}`,item);
+      setDeposits(p=>({...p,[name]:item}));
+      setDep({member:"",amount:""});
+    }catch{setConnErr("שגיאה");}finally{setSaving(false);}
+  };
+  const delDep=async k=>{await fbDel(`kupa3_dep/${activeId}/${k}`);setDeposits(p=>{const n={...p};delete n[k];return n;});};
+
+  // ── Refund ───────────────────────────────────────────────
+  const addRefund=async()=>{
+    if(!ref.memberId||!ref.amount)return;
+    const item={type:"refund",memberId:ref.memberId,amount:+ref.amount,
+      note:ref.note||"החזר",paidBy:"קופה",source:"envelope",shared:false,
+      ts:Date.now(),time:new Date().toLocaleTimeString("he-IL",{hour:"2-digit",minute:"2-digit"})};
+    setSaving(true);
+    try{
+      const{name}=await fbPush(`kupa3_exp/${activeId}`,item);
+      setExpenses(p=>({...p,[name]:item}));
+      setRef({memberId:"",amount:"",note:""});setRefModal(false);
+    }catch{setConnErr("שגיאה");}finally{setSaving(false);}
+  };
+
+  const proj   =activeId?projects[activeId]:null;
+  const Calc   =proj?calc(proj,expenses,deposits):null;
+  const pCol   =proj?(PROJ_TYPES[proj.type]?.color||"#c8853a"):"#c8853a";
+  const mName  =id=>proj?.members?.find(m=>m.id===id)?.name||id;
+  const cats   =proj?(PROJ_TYPES[proj.type]?.cats||["כללי"]):[];
+
+  if(loading)return(
+    <div style={S.ctr}><div className="spin" style={S.sp}/><div style={{color:"#c8853a",marginTop:12,fontSize:14,fontWeight:600}}>טוען...</div></div>
+  );
+
+  // ════════════════════════════════════════════════════════
+  // LOGIN SCREEN
+  // ════════════════════════════════════════════════════════
+  if(screen==="login")return(
+    <div style={S.app}>
+      <div style={{background:G(),padding:"48px 20px 32px",color:"white",textAlign:"center"}}>
+        <div style={{fontSize:56,marginBottom:10}}>💰</div>
+        <div style={{fontSize:30,fontWeight:800,letterSpacing:-1}}>קופה</div>
+        <div style={{fontSize:13,opacity:.8,marginTop:4}}>ניהול תקציב משותף</div>
+      </div>
+      <div style={{padding:16,maxWidth:380,margin:"0 auto"}}>
+        <div style={S.card}>
+          <div style={{fontSize:14,fontWeight:700,color:"#2c1810",marginBottom:3}}>יש לך קוד גישה?</div>
+          <div style={{fontSize:11,color:"#aaa",marginBottom:12}}>הזן את הקוד שקיבלת מהמפעיל</div>
+          <input placeholder="קוד גישה (8 תווים)" value={codeInput}
+            onChange={e=>setCodeInput(e.target.value.toUpperCase())}
+            onKeyDown={e=>e.key==="Enter"&&enterCode()}
+            style={{...S.inp,textAlign:"center",fontSize:18,letterSpacing:4,fontWeight:700}}/>
+          {codeErr&&<div style={S.err}>{codeErr}</div>}
+          <button onClick={enterCode} style={S.pri()}>כניסה עם קוד →</button>
+        </div>
+        <button onClick={()=>setScreen("super-login")}
+          style={{background:"none",border:"none",color:"#bbb",fontSize:11,cursor:"pointer",width:"100%",marginTop:8,textAlign:"center"}}>
+          כניסת מפעיל
+        </button>
+      </div>
+    </div>
+  );
+
+  // ── Super admin login ────────────────────────────────────
+  if(screen==="super-login")return(
+    <div style={S.app}>
+      <div style={{background:"linear-gradient(135deg,#2c3e50,#1a252f)",padding:"40px 20px 28px",color:"white",textAlign:"center"}}>
+        <div style={{fontSize:40,marginBottom:8}}>👑</div>
+        <div style={{fontSize:22,fontWeight:800}}>כניסת מפעיל</div>
+      </div>
+      <div style={{padding:16,maxWidth:360,margin:"0 auto"}}>
+        <div style={S.card}>
+          <input type="password" placeholder="קוד מפעיל" value={pinInput}
+            onChange={e=>setPinInput(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&superLogin()}
+            style={{...S.inp,textAlign:"center",fontSize:22,letterSpacing:8}} autoFocus/>
+          {pinErr&&<div style={S.err}>{pinErr}</div>}
+          <button onClick={superLogin} style={{...S.pri("#2c3e50")}}>כנס</button>
+          <button onClick={()=>setScreen("login")} style={S.gho}>חזרה</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ════════════════════════════════════════════════════════
+  // SUPER ADMIN DASHBOARD
+  // ════════════════════════════════════════════════════════
+  if(screen==="super"){
+    const active  =Object.values(projects).filter(p=>p.status==="active").sort((a,b)=>b.createdAt-a.createdAt);
+    const archived=Object.values(projects).filter(p=>p.status==="archived").sort((a,b)=>b.createdAt-a.createdAt);
+    const unusedCodes=Object.entries(codes).filter(([,v])=>!v.used);
+    const usedCodes  =Object.entries(codes).filter(([,v])=>v.used);
+
+    return(
+      <div style={S.app}>
+        <div style={{background:"linear-gradient(135deg,#2c3e50,#1a252f)",padding:"18px 14px 14px",color:"white"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:20,fontWeight:800}}>👑 לוח מפעיל</div>
+              <div style={{fontSize:11,opacity:.7,marginTop:2}}>קופה — ניהול עליון</div>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={()=>setAnalyticsM(true)}
+                style={{background:"rgba(255,255,255,.15)",border:"none",color:"white",padding:"5px 10px",borderRadius:14,fontSize:11,cursor:"pointer"}}>
+                📊 ניתוח
+              </button>
+              <button onClick={()=>setScreen("login")}
+                style={{background:"rgba(255,255,255,.1)",border:"none",color:"white",padding:"5px 10px",borderRadius:14,fontSize:11,cursor:"pointer"}}>
+                יציאה
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div style={{padding:14,maxWidth:520,margin:"0 auto"}}>
+          {connErr&&<div style={{...S.err,background:"#fff5f5",padding:10,borderRadius:8,marginBottom:10}}>{connErr}</div>}
+
+          {/* Stats row */}
+          <div style={{display:"flex",gap:8,marginBottom:14}}>
+            {[{l:"פרויקטים פעילים",v:active.length,c:"#c8853a"},
+              {l:"קודים פנויים",v:unusedCodes.length,c:"#27ae60"},
+              {l:"קודים בשימוש",v:usedCodes.length,c:"#2980b9"}]
+              .map(x=>(
+              <div key={x.l} style={{flex:1,background:"white",borderRadius:11,padding:"10px",textAlign:"center",boxShadow:"0 1px 6px rgba(0,0,0,.06)",borderTop:`3px solid ${x.c}`}}>
+                <div style={{fontSize:22,fontWeight:800,color:x.c}}>{x.v}</div>
+                <div style={{fontSize:10,color:"#aaa",marginTop:2}}>{x.l}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Generate code */}
+          <GenerateCodeBlock onGenerate={generateCode} unusedCodes={unusedCodes}/>
+
+          {/* Active projects */}
+          {active.length>0&&<>
+            <div style={{fontSize:11,color:"#aaa",fontWeight:600,marginBottom:7}}>פרויקטים פעילים</div>
+            {active.map(p=>{
+              const ti=PROJ_TYPES[p.type]||PROJ_TYPES.custom;
+              return(
+                <div key={p.id} style={{...S.card,borderRight:`4px solid ${ti.color}`,padding:"12px 14px",marginBottom:7}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:14,fontWeight:700,color:"#2c1810"}}>{p.name}</div>
+                      <div style={{fontSize:11,color:"#aaa",marginTop:2}}>
+                        {ti.label} · {p.members?.length||0} משתתפים · קוד: <strong>{p.accessCode}</strong>
+                      </div>
+                      {p.questionnaire&&<div style={{fontSize:10,color:"#aaa",marginTop:3}}>
+                        {Object.entries(p.questionnaire).slice(0,3).map(([k,v])=>`${k}: ${v}`).join(" · ")}
+                      </div>}
+                    </div>
+                    <div style={{display:"flex",gap:5,flexDirection:"column",alignItems:"flex-end"}}>
+                      <span style={S.pill(ti.color)}>{p.members?.length||0} 👥</span>
+                      <button onClick={async()=>{await archiveProject(p.id);}}
+                        style={{background:"#fff3e0",border:"none",color:"#e67e22",borderRadius:6,padding:"3px 8px",fontSize:10,cursor:"pointer"}}>
+                        ארכיון
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </>}
+
+          {/* Archived */}
+          {archived.length>0&&<>
+            <div style={{fontSize:11,color:"#aaa",fontWeight:600,marginBottom:7,marginTop:8}}>ארכיון</div>
+            {archived.map(p=>{
+              const ti=PROJ_TYPES[p.type]||PROJ_TYPES.custom;
+              return(
+                <div key={p.id} style={{...S.card,opacity:.55,padding:"10px 13px",marginBottom:6,borderRight:`3px solid ${ti.color}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:600,color:"#555"}}>{p.name}</div>
+                      <div style={{fontSize:10,color:"#aaa"}}>{ti.label} · {p.accessCode}</div>
+                    </div>
+                    <div style={{display:"flex",gap:5}}>
+                      <button onClick={()=>updateProject(p.id,{status:"active"})}
+                        style={{background:"#e8f5e9",border:"none",color:"#27ae60",borderRadius:6,padding:"3px 8px",fontSize:10,cursor:"pointer"}}>שחזר</button>
+                      <button onClick={()=>deleteProject(p.id)}
+                        style={{background:"#fdecea",border:"none",color:"#e74c3c",borderRadius:6,padding:"3px 8px",fontSize:10,cursor:"pointer"}}>מחק</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </>}
+        </div>
+
+        {analyticsM&&<AnalyticsModal projects={projects} onClose={()=>setAnalyticsM(false)}/>}
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════
+  // SETUP SCREEN (group admin, first time with code)
+  // ════════════════════════════════════════════════════════
+  if(screen==="setup")return(
+    <SetupWizard
+      code={codeInput}
+      onCreate={createProject}
+      onBack={()=>setScreen("login")}
+    />
+  );
+
+  // ════════════════════════════════════════════════════════
+  // PROJECT SCREEN
+  // ════════════════════════════════════════════════════════
+  if(screen==="project"&&proj&&Calc){
+    const envColor=Calc.envBal>=0?"#27ae60":"#e74c3c";
+    const netColor=Calc.netAv>=0?"#27ae60":"#e74c3c";
+
+    return(
+      <div style={S.app}>
+        {/* Header */}
+        <div style={{background:G(pCol),padding:"13px 13px 11px",color:"white"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <button onClick={()=>{setScreen("login");setActiveId(null);setExpenses({});setDeposits({});}}
+                style={{background:"rgba(255,255,255,.2)",border:"none",color:"white",padding:"4px 9px",borderRadius:13,fontSize:11,cursor:"pointer"}}>
+                ← יציאה
+              </button>
+              <div>
+                <div style={{fontSize:15,fontWeight:700}}>{proj.name}</div>
+                <div style={{fontSize:10,opacity:.75}}>{PROJ_TYPES[proj.type]?.label}</div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:5,alignItems:"center"}}>
+              {saving&&<span style={{fontSize:9,opacity:.7}}>שומר...</span>}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+            {[`₪${Calc.totDep.toFixed(0)} הפקדות`,`₪${Calc.totalSh.toFixed(0)} הוצאות`,`${proj.members?.length||0} משתתפים`]
+              .map(t=><span key={t} style={{background:"rgba(0,0,0,.18)",padding:"2px 8px",borderRadius:20,fontSize:10}}>{t}</span>)}
+          </div>
+        </div>
+
+        {/* Nav */}
+        <div style={{display:"flex",background:"white",borderBottom:"2px solid #ede0cc",overflowX:"auto"}}>
+          {[["expenses","💳 הוצאות"],["balance","⚖️ מאזן"],["deposits","💰 הפקדות"],["admin","🔑 ניהול"]]
+            .map(([v,l])=>(
+              <button key={v} onClick={()=>setPView(v)}
+                style={{flex:1,padding:"10px 2px",border:"none",background:"transparent",fontSize:11,fontWeight:600,
+                  cursor:"pointer",whiteSpace:"nowrap",minWidth:50,
+                  color:pView===v?pCol:"#aaa",
+                  borderBottom:pView===v?`2px solid ${pCol}`:"none",marginBottom:pView===v?-2:0}}>
+                {l}
+              </button>
+            ))}
+        </div>
+
+        <div style={{padding:11,maxWidth:520,margin:"0 auto"}}>
+
+          {/* Summary bar */}
+          <div style={{display:"flex",gap:7,marginBottom:10}}>
+            {[{l:"יתרת מעטפה",v:`₪${Calc.envBal.toFixed(0)}`,s:"לפני החזרים",c:envColor},
+              {l:"פנוי בפועל",v:`₪${Calc.netAv.toFixed(0)}`,s:"אחרי החזרים",c:netColor}]
+              .map(x=>(
+                <div key={x.l} style={{flex:1,background:"white",borderRadius:11,padding:"9px 11px",
+                  boxShadow:"0 1px 5px rgba(0,0,0,.06)",borderTop:`3px solid ${x.c}`}}>
+                  <div style={{fontSize:10,color:"#aaa",marginBottom:2}}>{x.l}</div>
+                  <div style={{fontSize:17,fontWeight:800,color:x.c}}>{x.v}</div>
+                  <div style={{fontSize:10,color:"#aaa",marginTop:1}}>{x.s}</div>
+                </div>
+              ))}
+          </div>
+
+          {Calc.shortfall>0&&(
+            <div style={{background:"#fff5f5",border:"1px solid #fcc",borderRadius:10,padding:"9px 11px",marginBottom:10}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#c0392b",marginBottom:4}}>⚠️ חריגה — ₪{Calc.shortfall.toFixed(0)}</div>
+              {Calc.members.map(m=>(
+                <div key={m.id} style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}>
+                  <span style={{color:"#555"}}>{m.name}</span>
+                  <span style={{fontWeight:700,color:"#c0392b"}}>+₪{(Calc.shortfall/Calc.members.length).toFixed(0)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* EXPENSES */}
+          {pView==="expenses"&&<>
+            <div style={S.card}>
+              <div style={{fontSize:13,fontWeight:700,color:"#2c1810",marginBottom:9}}>רישום הוצאה</div>
+              <div style={S.row}>
+                <select value={exp.paidBy} onChange={e=>setExp({...exp,paidBy:e.target.value})}
+                  style={{...S.sel,marginBottom:0,flex:2}}>
+                  <option value="">מי ביצע?</option>
+                  {Calc.members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+                <input type="number" placeholder="₪" value={exp.amount}
+                  onChange={e=>setExp({...exp,amount:e.target.value})}
+                  style={{...S.inp,marginBottom:0,flex:"0 0 76px"}}/>
+              </div>
+              <div style={S.row}>
+                <select value={exp.cat} onChange={e=>setExp({...exp,cat:e.target.value})}
+                  style={{...S.sel,marginBottom:0}}>
+                  <option value="">קטגוריה</option>
+                  {cats.map(c=><option key={c}>{c}</option>)}
+                </select>
+                <input placeholder="הערה" value={exp.note}
+                  onChange={e=>setExp({...exp,note:e.target.value})}
+                  style={{...S.inp,marginBottom:0}}/>
+              </div>
+              <div style={{background:"#f7f3ee",borderRadius:9,padding:9,margin:"8px 0"}}>
+                <div style={{fontSize:11,color:"#888",marginBottom:5,fontWeight:600}}>מקור תשלום:</div>
+                <div style={{display:"flex",gap:6}}>
+                  {[["envelope","🪙 מעטפה"],["private","💵 כיס פרטי"]].map(([v,l])=>(
+                    <button key={v} onClick={()=>setExp({...exp,source:v})}
+                      style={{flex:1,padding:"7px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",
+                        background:exp.source===v?pCol:"white",color:exp.source===v?"white":"#888",
+                        boxShadow:"0 1px 3px rgba(0,0,0,.08)"}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                <div style={{fontSize:11,marginTop:6,padding:"5px 7px",borderRadius:6,
+                  background:exp.source==="private"?"#fff8f0":"#f0fff4",
+                  color:exp.source==="private"?"#e67e22":"#27ae60"}}>
+                  {exp.source==="private"?"⚠️ המשלם יזוכה":"✓ מקוזזת מיתרת המעטפה"}
+                </div>
+              </div>
+              <label style={{display:"flex",alignItems:"center",fontSize:12,color:"#555",cursor:"pointer",marginBottom:8}}>
+                <input type="checkbox" checked={exp.shared} onChange={e=>setExp({...exp,shared:e.target.checked})} style={{marginLeft:7}}/>
+                הוצאה משותפת
+              </label>
+              <button onClick={addExpense} disabled={saving} style={S.pri(pCol)}>רשום הוצאה</button>
+              <button onClick={()=>setRefModal(true)} style={S.sec("#3498db")}>💵 החזר מזומן</button>
+            </div>
+            {Calc.expList.length===0&&<div style={{textAlign:"center",color:"#aaa",padding:28,fontSize:13}}>עדיין אין הוצאות 🌴</div>}
+            {Calc.expList.map(([k,e])=>{
+              const isR=e.type==="refund";
+              return(
+                <div key={k} className="lift fade" style={{background:"white",borderRadius:11,padding:"10px 12px",
+                  display:"flex",alignItems:"center",gap:8,boxShadow:"0 1px 5px rgba(0,0,0,.05)",marginBottom:6,
+                  borderRight:`3px solid ${isR?"#3498db":e.source==="private"?"#e67e22":"#2ecc71"}`}}>
+                  <span style={{fontSize:18,flexShrink:0}}>{isR?"💵":e.cat?.[0]||"📦"}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"#2c1810"}}>
+                      {isR?`החזר → ${mName(e.memberId)}`:mName(e.paidBy)}
+                    </div>
+                    {(e.cat||e.note)&&<div style={{fontSize:11,color:"#aaa",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {[e.cat,e.note].filter(Boolean).join(" · ")}
+                    </div>}
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:2,flexShrink:0}}>
+                    <span style={{fontWeight:800,color:pCol,fontSize:14}}>₪{(+e.amount).toFixed(0)}</span>
+                    <span style={{fontSize:9,padding:"2px 5px",borderRadius:5,
+                      background:isR?"#ebf5fb":e.source==="private"?"#fef5e7":"#eafaf1",
+                      color:isR?"#2980b9":e.source==="private"?"#d35400":"#27ae60"}}>
+                      {isR?"החזר":e.source==="private"?"כיס פרטי":"מעטפה"}
+                    </span>
+                    <span style={{fontSize:9,color:"#ccc"}}>{e.time}</span>
+                  </div>
+                  <button onClick={()=>delExp(k)} style={S.del}>✕</button>
+                </div>
+              );
+            })}
+          </>}
+
+          {/* BALANCE */}
+          {pView==="balance"&&<>
+            <div style={{...S.card,background:"#fffbf5",border:"1px solid #ede0cc",fontSize:11,color:"#888",lineHeight:1.7,marginBottom:8}}>
+              <strong style={{color:pCol}}>יתרה = </strong>הפקדה + כיס פרטי פחות חלק יחסי בהוצאות
+              <br/><span style={{color:"#27ae60"}}>+ = מגיע חזרה</span> · <span style={{color:"#e74c3c"}}>− = עדיין חייב</span>
+            </div>
+            {Calc.members.map(m=>{
+              const bal=Calc.mBal(m),pos=bal>=0;
+              return(
+                <div key={m.id} style={{...S.card,borderRight:`4px solid ${pos?"#2ecc71":"#e74c3c"}`,padding:"12px 13px",marginBottom:7}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:700,color:"#2c1810"}}>{m.name}</div>
+                      <div style={{fontSize:11,color:"#aaa",marginTop:1}}>
+                        {m.persons>1?`${m.persons} נפשות`:""}
+                      </div>
+                    </div>
+                    <div style={{textAlign:"left"}}>
+                      <div style={{fontSize:20,fontWeight:800,color:pos?"#2ecc71":"#e74c3c"}}>
+                        {pos?"+":""}₪{Math.abs(bal).toFixed(0)}
+                      </div>
+                      <div style={{fontSize:10,color:pos?"#27ae60":"#c0392b",fontWeight:600}}>
+                        {pos?"מגיע חזרה ✓":"צריך להשלים →"}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{background:"#fafafa",borderRadius:8,padding:"8px 10px",fontSize:11}}>
+                    {[["הפקיד",`+₪${Calc.mDep(m).toFixed(0)}`,"#27ae60"],
+                      ...(Calc.mPriv(m)>0?[["שילם מהכיס",`+₪${Calc.mPriv(m).toFixed(0)}`,"#27ae60"]]:[]),
+                      ["חלק בהוצאות",`−₪${Calc.mShare(m).toFixed(0)}`,"#e74c3c"],
+                      ...(Calc.mRef(m)>0?[["קיבל החזר",`−₪${Calc.mRef(m).toFixed(0)}`,"#e74c3c"]]:[]),
+                    ].map(([l,v,c])=>(
+                      <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:3,color:"#888"}}>
+                        <span>{l}</span><span style={{color:c,fontWeight:600}}>{v}</span>
+                      </div>
+                    ))}
+                    <div style={{borderTop:"1px solid #eee",marginTop:4,paddingTop:4,display:"flex",justifyContent:"space-between",fontWeight:700}}>
+                      <span style={{color:"#555"}}>תרומה בפועל</span>
+                      <span style={{color:pCol}}>₪{Calc.mContrib(m).toFixed(0)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{...S.card,background:"#f0fff4",border:"1px solid #c3e6cb"}}>
+              {[["הפקדות",`+₪${Calc.totDep.toFixed(0)}`,"#27ae60"],
+                ["הוצאות מעטפה",`−₪${Calc.envExp.toFixed(0)}`,"#e74c3c"],
+                ["החזרים",`−₪${Calc.refGiven.toFixed(0)}`,"#e74c3c"]]
+                .map(([l,v,c])=>(
+                  <div key={l} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#666",marginBottom:4}}>
+                    <span>{l}</span><span style={{color:c}}>{v}</span>
+                  </div>
+                ))}
+              <div style={{borderTop:"1px solid #b2dfdb",paddingTop:5,marginTop:4,display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700}}>
+                <span>פנוי בפועל</span><span style={{color:netColor}}>₪{Calc.netAv.toFixed(0)}</span>
+              </div>
+            </div>
+          </>}
+
+          {/* DEPOSITS */}
+          {pView==="deposits"&&<>
+            <div style={S.card}>
+              <div style={{fontSize:13,fontWeight:700,color:"#2c1810",marginBottom:9}}>רישום הפקדה</div>
+              <div style={S.row}>
+                <select value={dep.member} onChange={e=>setDep({...dep,member:e.target.value})}
+                  style={{...S.sel,marginBottom:0}}>
+                  <option value="">בחר משתתף</option>
+                  {Calc.members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+                <input type="number" placeholder="₪" value={dep.amount}
+                  onChange={e=>setDep({...dep,amount:e.target.value})}
+                  style={{...S.inp,marginBottom:0,flex:"0 0 76px"}}/>
+              </div>
+              <button onClick={addDeposit} disabled={saving} style={{...S.pri(pCol),marginTop:8}}>הפקד</button>
+            </div>
+            {Calc.members.map(m=>(
+              <div key={m.id} style={{...S.card,padding:"10px 13px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#2c1810"}}>{m.name}</div>
+                <div style={{fontSize:15,fontWeight:800,color:pCol}}>₪{Calc.mDep(m).toFixed(0)}</div>
+              </div>
+            ))}
+            {Calc.depList.length>0&&<>
+              <div style={{fontSize:11,color:"#aaa",marginBottom:5,marginTop:2}}>היסטוריה</div>
+              {[...Calc.depList].sort((a,b)=>(b[1].ts||0)-(a[1].ts||0)).map(([k,d])=>(
+                <div key={k} style={{background:"white",borderRadius:10,padding:"9px 12px",display:"flex",
+                  alignItems:"center",gap:8,boxShadow:"0 1px 5px rgba(0,0,0,.05)",marginBottom:5}}>
+                  <span style={{fontSize:16}}>💰</span>
+                  <div style={{flex:1}}><div style={{fontWeight:600,fontSize:12,color:"#2c1810"}}>{mName(d.member)}</div></div>
+                  <span style={{fontWeight:700,color:pCol,fontSize:13}}>₪{d.amount.toFixed(0)}</span>
+                  <button onClick={()=>delDep(k)} style={S.del}>✕</button>
+                </div>
+              ))}
+            </>}
+          </>}
+
+          {/* ADMIN */}
+          {pView==="admin"&&<>
+            <div style={S.card}>
+              <div style={{fontSize:13,fontWeight:700,color:"#2c1810",marginBottom:8}}>שיתוף</div>
+              <button onClick={()=>navigator.clipboard.writeText(window.location.href)} style={S.pri(pCol)}>
+                📋 העתק קישור לשיתוף
+              </button>
+            </div>
+            <div style={S.card}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#2c1810"}}>משתתפים</div>
+                <button onClick={()=>setEditMModal(true)}
+                  style={{background:"#fdf3e6",border:"none",color:pCol,borderRadius:7,padding:"4px 9px",fontSize:11,fontWeight:600,cursor:"pointer"}}>
+                  ✏️ ערוך
+                </button>
+              </div>
+              {Calc.members.map(m=>(
+                <div key={m.id} style={{display:"flex",justifyContent:"space-between",background:"#fdf3e6",borderRadius:7,padding:"6px 10px",marginBottom:4}}>
+                  <span style={{fontSize:12,fontWeight:600,color:"#a0662a"}}>{m.name}</span>
+                  <span style={{fontSize:11,color:pCol}}>{m.persons>1?`${m.persons} נפשות`:""}</span>
+                </div>
+              ))}
+            </div>
+            <div style={S.card}>
+              <div style={{fontSize:13,fontWeight:700,color:"#2c1810",marginBottom:8}}>פעולות</div>
+              <button onClick={()=>setRefModal(true)} style={{...S.pri(),...{background:"#3498db"},marginBottom:6}}>
+                💵 רישום החזר מזומן
+              </button>
+              <button onClick={async()=>{await fbSet(`kupa3_exp/${activeId}`,null);await fbSet(`kupa3_dep/${activeId}`,null);setExpenses({});setDeposits({});}}
+                style={{...S.pri(),...{background:"#e67e22"},marginBottom:6}}>
+                🗑️ מחיקת הוצאות והפקדות
+              </button>
+            </div>
+
+            {/* Final summary */}
+            <div style={{...S.card,border:"2px solid #c8853a",background:"#fffbf5"}}>
+              <div style={{fontSize:14,fontWeight:700,color:"#c8853a",marginBottom:4}}>🏁 סיום ודוח סופי</div>
+              <div style={{fontSize:11,color:"#888",marginBottom:10,lineHeight:1.6}}>
+                לסיום המסע — מלא משוב קצר וקבל דוח מסכם מלא עם חלוקת החזרים.
+              </div>
+              <button onClick={()=>setFeedbackM(true)} style={S.pri()}>
+                סיום המסע ← דוח סופי
+              </button>
+            </div>
+          </>}
+        </div>
+
+        {/* Modals */}
+        {refModal&&<RefundModal members={Calc.members} ref_={ref} setRef={setRef}
+          onAdd={addRefund} onClose={()=>setRefModal(false)} saving={saving} color={pCol}/>}
+        {editMModal&&<EditMembersModal proj={proj} onClose={()=>setEditMModal(false)}
+          onSave={async members=>{await updateProject(activeId,{members});setEditMModal(false);}}/>}
+        {feedbackM&&<FeedbackModal
+          onSubmit={async feedback=>{
+            await updateProject(activeId,{feedback,status:"archived",closedAt:Date.now()});
+            setFeedbackM(false);setReportM(true);
+          }}
+          onClose={()=>setFeedbackM(false)}/>}
+        {reportM&&<FinalReportModal proj={proj} Calc={Calc} color={pCol}
+          onClose={()=>{setReportM(false);setScreen("login");setActiveId(null);}}/>}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ── Generate code block ───────────────────────────────────────
+function GenerateCodeBlock({onGenerate,unusedCodes}){
+  const [lastCode,setLastCode]=useState("");
+  const [loading, setLoading]=useState(false);
+  const gen=async()=>{
+    setLoading(true);
+    const c=await onGenerate();
+    setLastCode(c);setLoading(false);
+  };
+  return(
+    <div style={{...S.card,border:"2px solid #c8853a",background:"#fffbf5",marginBottom:14}}>
+      <div style={{fontSize:13,fontWeight:700,color:"#c8853a",marginBottom:6}}>🎟️ יצירת קוד גישה חדש</div>
+      <div style={{fontSize:11,color:"#888",marginBottom:10,lineHeight:1.6}}>
+        כל קוד מאפשר לאדמין קבוצה אחד לפתוח פרויקט חדש. לאחר השימוש הקוד נעול לאותו פרויקט.
+      </div>
+      <button onClick={gen} disabled={loading} style={S.pri()}>
+        {loading?"מייצר...":"+ צור קוד גישה חדש"}
+      </button>
+      {lastCode&&(
+        <div style={{marginTop:10,background:"white",borderRadius:10,padding:12,textAlign:"center",border:"1px solid #ede0cc"}}>
+          <div style={{fontSize:11,color:"#aaa",marginBottom:5}}>הקוד החדש — שלח לאדמין הקבוצה:</div>
+          <div style={{fontSize:28,fontWeight:800,letterSpacing:4,color:"#c8853a",fontFamily:"monospace"}}>{lastCode}</div>
+          <button onClick={()=>navigator.clipboard.writeText(lastCode)}
+            style={{background:"#fdf3e6",border:"none",color:"#c8853a",borderRadius:8,padding:"5px 14px",fontSize:12,cursor:"pointer",marginTop:8}}>
+            📋 העתק קוד
+          </button>
+        </div>
+      )}
+      {unusedCodes.length>0&&(
+        <div style={{marginTop:8,fontSize:11,color:"#aaa"}}>
+          קודים פנויים: {unusedCodes.map(([c])=><span key={c} style={{background:"#f0f0f0",borderRadius:5,padding:"1px 6px",marginRight:4,fontFamily:"monospace"}}>{c}</span>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Setup Wizard ──────────────────────────────────────────────
+function SetupWizard({code,onCreate,onBack}){
+  const [step,   setStep]  =useState(1);
+  const [type,   setType]  =useState("");
+  const [saving, setSaving]=useState(false);
+  const [err,    setErr]   =useState("");
+
+  const [name,      setName]     =useState("");
+  const [desc,      setDesc]     =useState("");
+  const [splitMode, setSplit]    =useState("persons");
+  const [totalDays, setTotalDays]=useState("3");
+  const [goal,      setGoal]     =useState("");
+
+  const [q,setQ]=useState({
+    groupType:"משפחות עם ילדים",priorEvents:"ראשון",
+    avgAge:"30-45",luxLevel:"3",location:"ארץ",
+    purpose:"חיבור וקרבה",paymentMethod:"מזומן + ביט",
+    budget:"",extraNotes:""
+  });
+
+  const [members,setMembers]=useState([{id:"m1",name:"",persons:1}]);
+  const ti=PROJ_TYPES[type];
+  const updM=(i,k,v)=>{const n=[...members];n[i]={...n[i],[k]:v};setMembers(n);};
+
+  const submit=async()=>{
+    const mems=members.filter(m=>m.name.trim()).map(m=>({...m,persons:parseInt(m.persons)||1}));
+    if(mems.length<1){setErr("יש להוסיף לפחות משתתף אחד");return;}
+    setSaving(true);
+    try{
+      await onCreate({type,name:name.trim(),description:desc.trim(),
+        splitMode,totalDays:parseInt(totalDays)||3,goal:goal?parseFloat(goal):null,
+        members:mems,
+        questionnaire:{
+          "סוג קבוצה":q.groupType,"אירועים קודמים":q.priorEvents,
+          "טווח גיל":q.avgAge,"רמת פנסיוניות (1-5)":q.luxLevel,
+          "יעד גיאוגרפי":q.location,"מטרת האירוע":q.purpose,
+          "אמצעי תשלום":q.paymentMethod,
+          ...(q.budget?{"תקציב מוערך":q.budget}:{}),
+          ...(q.extraNotes?{"הערות":q.extraNotes}:{}),
+        }
+      });
+    }catch{setErr("שגיאה");}finally{setSaving(false);}
+  };
+
+  return(
+    <div style={S.app}>
+      <div style={{background:G(ti?.color||"#c8853a"),padding:"16px 14px 12px",color:"white"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+          <button onClick={onBack}
+            style={{background:"rgba(255,255,255,.2)",border:"none",color:"white",padding:"4px 9px",borderRadius:13,fontSize:11,cursor:"pointer"}}>
+            ← חזרה
+          </button>
+          <div>
+            <div style={{fontSize:15,fontWeight:700}}>פתיחת פרויקט חדש</div>
+            <div style={{fontSize:10,opacity:.75}}>קוד גישה: {code}</div>
+          </div>
+        </div>
+        <div style={{display:"flex",justifyContent:"center",gap:8}}>
+          {[1,2,3].map(s=>(
+            <div key={s} style={{display:"flex",alignItems:"center",gap:4}}>
+              <div style={{width:24,height:24,borderRadius:"50%",
+                background:step>=s?"white":"rgba(255,255,255,.3)",
+                color:step>=s?(ti?.color||"#c8853a"):"white",
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:12,fontWeight:700}}>
+                {s}
+              </div>
+              {s<3&&<div style={{width:20,height:2,background:"rgba(255,255,255,.3)"}}/>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{padding:14,maxWidth:480,margin:"0 auto"}}>
+
+        {/* Step 1 */}
+        {step===1&&<div className="fade">
+          <div style={{...S.card}}>
+            <div style={{fontSize:14,fontWeight:700,color:"#2c1810",marginBottom:12}}>סוג הפרויקט ופרטים</div>
+            {!type&&<>
+              <div style={S.lbl}>בחר סוג:</div>
+              {Object.entries(PROJ_TYPES).map(([k,v])=>(
+                <button key={k} onClick={()=>setType(k)}
+                  style={{width:"100%",background:"white",border:`2px solid ${v.color}33`,borderRadius:11,
+                    padding:"11px 13px",marginBottom:7,cursor:"pointer",textAlign:"right",
+                    display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:32,height:32,borderRadius:"50%",background:v.color+"22",
+                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>
+                    {v.label.split(" ")[0]}
+                  </div>
+                  <div style={{fontSize:13,fontWeight:700,color:"#2c1810"}}>{v.label.split(" ").slice(1).join(" ")}</div>
+                </button>
+              ))}
+            </>}
+            {type&&ti&&<>
+              <button onClick={()=>setType("")}
+                style={{background:"none",border:"none",color:ti.color,fontSize:12,cursor:"pointer",marginBottom:8,fontWeight:600}}>
+                {ti.label} ← שנה
+              </button>
+              <label style={S.lbl}>שם הפרויקט *</label>
+              <input placeholder='לדוגמה: "וילה יוני 2025"' value={name} onChange={e=>setName(e.target.value)} style={S.inp}/>
+              <label style={S.lbl}>תיאור (אופציונלי)</label>
+              <textarea placeholder="מהות הפרויקט..." value={desc} onChange={e=>setDesc(e.target.value)} style={{...S.ta,height:50}}/>
+              <div style={S.row}>
+                <div style={{flex:1}}>
+                  <label style={S.lbl}>ימים</label>
+                  <input type="number" min="1" value={totalDays} onChange={e=>setTotalDays(e.target.value)} style={{...S.inp,marginBottom:0}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <label style={S.lbl}>יעד תקציב ₪</label>
+                  <input type="number" value={goal} onChange={e=>setGoal(e.target.value)} style={{...S.inp,marginBottom:0}}/>
+                </div>
+              </div>
+              <label style={{...S.lbl,marginTop:8}}>שיטת חלוקה</label>
+              <select value={splitMode} onChange={e=>setSplit(e.target.value)} style={S.sel}>
+                {SPLIT_MODES.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+              {err&&<div style={S.err}>{err}</div>}
+              <button onClick={()=>{if(!name.trim()){setErr("יש לתת שם לפרויקט");return;}setErr("");setStep(2);}}
+                style={S.pri(ti.color)}>המשך ←</button>
+            </>}
+          </div>
+        </div>}
+
+        {/* Step 2 — questionnaire */}
+        {step===2&&ti&&<div className="fade">
+          <div style={S.card}>
+            <div style={{fontSize:14,fontWeight:700,color:"#2c1810",marginBottom:4}}>📋 שאלון הפרויקט</div>
+            <div style={{fontSize:11,color:"#aaa",marginBottom:12}}>המידע ישמש לשיפור האפליקציה ולמתן המלצות</div>
+            {[
+              {l:"סוג הקבוצה",k:"groupType",opts:["זוגות בלבד","משפחות עם ילדים","חברים ללא ילדים","מעורב","עמיתים לעבודה"]},
+              {l:"אירועים קודמים יחד?",k:"priorEvents",opts:["ראשון","פעם-פעמיים","ותיקים"]},
+              {l:"טווח גיל עיקרי",k:"avgAge",opts:["עד 30","30-45","45-60","60+","מעורב"]},
+              {l:"רמת פנסיוניות (1=דרוויש, 5=פנסי)",k:"luxLevel",opts:["1","2","3","4","5"]},
+              {l:"יעד גיאוגרפי",k:"location",opts:["ארץ","אירופה","חו\"ל רחוק","אחר"]},
+              {l:"מטרת האירוע",k:"purpose",opts:["חיבור וקרבה","חגיגה","הרפתקה","רגיעה","עסקי"]},
+              {l:"אמצעי תשלום מועדף",k:"paymentMethod",opts:["מזומן","מזומן + ביט","העברה","כרטיס"]},
+            ].map(({l,k,opts})=>(
+              <div key={k} style={{marginBottom:10}}>
+                <label style={S.lbl}>{l}</label>
+                <select value={q[k]} onChange={e=>setQ({...q,[k]:e.target.value})} style={{...S.sel,marginBottom:0}}>
+                  {opts.map(o=><option key={o}>{o}</option>)}
+                </select>
+              </div>
+            ))}
+            <label style={S.lbl}>תקציב מוערך כולל ₪</label>
+            <input type="number" placeholder="0" value={q.budget} onChange={e=>setQ({...q,budget:e.target.value})} style={S.inp}/>
+            <label style={S.lbl}>הערות נוספות</label>
+            <textarea placeholder="כל מה שרלוונטי..." value={q.extraNotes}
+              onChange={e=>setQ({...q,extraNotes:e.target.value})} style={{...S.ta,height:50}}/>
+            <div style={{display:"flex",gap:7,marginTop:4}}>
+              <button onClick={()=>setStep(1)} style={{...S.gho,flex:1,marginTop:0}}>← חזרה</button>
+              <button onClick={()=>setStep(3)} style={{...S.pri(ti.color),flex:2,marginTop:0}}>המשך ←</button>
+            </div>
+          </div>
+        </div>}
+
+        {/* Step 3 — members */}
+        {step===3&&ti&&<div className="fade">
+          <div style={S.card}>
+            <div style={{fontSize:14,fontWeight:700,color:"#2c1810",marginBottom:4}}>משתתפים</div>
+            <div style={{fontSize:11,color:"#aaa",marginBottom:12}}>שם + מספר נפשות לכל משתתף</div>
+            {members.map((m,i)=>(
+              <div key={m.id} style={{background:"#fafafa",borderRadius:10,padding:10,marginBottom:7,border:"1px solid #ede0cc"}}>
+                <div style={S.row}>
+                  <input placeholder={`שם ${i+1}`} value={m.name} onChange={e=>updM(i,"name",e.target.value)}
+                    style={{...S.inp,marginBottom:0,flex:2}}/>
+                  <input type="number" min="1" placeholder="נפשות" value={m.persons}
+                    onChange={e=>updM(i,"persons",parseInt(e.target.value)||1)}
+                    style={{...S.inp,marginBottom:0,flex:"0 0 58px",textAlign:"center"}}/>
+                  {members.length>1&&<button onClick={()=>setMembers(members.filter((_,j)=>j!==i))}
+                    style={{...S.del,color:"#e74c3c"}}>✕</button>}
+                </div>
+              </div>
+            ))}
+            <button onClick={()=>setMembers([...members,{id:"m"+Date.now(),name:"",persons:1}])} style={S.gho}>
+              + הוסף משתתף
+            </button>
+            {err&&<div style={S.err}>{err}</div>}
+            <div style={{display:"flex",gap:7,marginTop:4}}>
+              <button onClick={()=>setStep(2)} style={{...S.gho,flex:1,marginTop:0}}>← חזרה</button>
+              <button onClick={submit} disabled={saving} style={{...S.pri(ti.color),flex:2,marginTop:0}}>
+                {saving?"יוצר...":"פתח פרויקט 🚀"}
+              </button>
+            </div>
+          </div>
+        </div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Feedback Modal ────────────────────────────────────────────
+function FeedbackModal({onSubmit,onClose}){
+  const [f,setF]=useState({
+    overall:"",ease:"",clarity:"",missing:"",changed:"",recommend:"",
+    expScreen:"",balScreen:"",depScreen:"",adminScreen:""
+  });
+  const [saving,setSaving]=useState(false);
+  const stars=(k,label)=>(
+    <div style={{marginBottom:12}}>
+      <label style={S.lbl}>{label}</label>
+      <div style={{display:"flex",gap:6}}>
+        {[1,2,3,4,5].map(n=>(
+          <button key={n} onClick={()=>setF({...f,[k]:n})}
+            style={{width:40,height:40,borderRadius:8,border:`2px solid ${f[k]>=n?"#c8853a":"#ede0cc"}`,
+              background:f[k]>=n?"#fdf3e6":"white",fontSize:16,cursor:"pointer",
+              color:f[k]>=n?"#c8853a":"#ccc"}}>
+            ★
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  return(
+    <div style={S.ov}>
+      <div style={S.mod}>
+        <div style={{fontSize:16,fontWeight:700,color:"#2c1810",marginBottom:4,textAlign:"center"}}>🙏 משוב לפני הסיכום</div>
+        <div style={{fontSize:11,color:"#aaa",marginBottom:14,textAlign:"center",lineHeight:1.6}}>
+          לוקח 2 דקות — עוזר לנו לשפר את קופה לכולם
+        </div>
+
+        <div style={{fontSize:12,fontWeight:700,color:"#555",marginBottom:8}}>חוויה כללית</div>
+        {stars("overall","כמה האפליקציה שרתה אותך?")}
+        {stars("ease","כמה קל היה להשתמש?")}
+        {stars("clarity","כמה ברורים החישובים והמאזן?")}
+
+        <div style={{fontSize:12,fontWeight:700,color:"#555",marginBottom:8,marginTop:4}}>מסכים ספציפיים</div>
+        {stars("expScreen","מסך הוצאות")}
+        {stars("balScreen","מסך מאזן")}
+        {stars("depScreen","מסך הפקדות")}
+        {stars("adminScreen","מסך ניהול")}
+
+        <div style={{fontSize:12,fontWeight:700,color:"#555",marginBottom:8,marginTop:4}}>שאלות פתוחות</div>
+        <label style={S.lbl}>מה הכי חסר לך?</label>
+        <textarea value={f.missing} onChange={e=>setF({...f,missing:e.target.value})}
+          placeholder="פיצ'ר, מסך, תהליך..." style={{...S.ta,height:55}}/>
+        <label style={S.lbl}>מה היית משנה?</label>
+        <textarea value={f.changed} onChange={e=>setF({...f,changed:e.target.value})}
+          placeholder="מה עשה לך בעיה?" style={{...S.ta,height:55}}/>
+        <label style={S.lbl}>האם תמליץ לאחרים? (1-5)</label>
+        <div style={{display:"flex",gap:6,marginBottom:12}}>
+          {[1,2,3,4,5].map(n=>(
+            <button key={n} onClick={()=>setF({...f,recommend:n})}
+              style={{flex:1,height:36,borderRadius:8,border:`2px solid ${f.recommend>=n?"#27ae60":"#ede0cc"}`,
+                background:f.recommend>=n?"#e8f5e9":"white",fontSize:14,cursor:"pointer",
+                color:f.recommend>=n?"#27ae60":"#ccc",fontWeight:700}}>
+              {n}
+            </button>
+          ))}
+        </div>
+        <button onClick={async()=>{setSaving(true);await onSubmit(f);setSaving(false);}}
+          disabled={saving} style={S.pri()}>
+          {saving?"שומר...":"שלח משוב ← קבל דוח סופי 🏁"}
+        </button>
+        <button onClick={onClose} style={S.gho}>דלג על המשוב</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Final Report Modal ────────────────────────────────────────
+function FinalReportModal({proj,Calc,color,onClose}){
+  return(
+    <div style={S.ov}>
+      <div style={{...S.mod,background:"white"}}>
+        <div style={{background:G(color),borderRadius:"12px 12px 0 0",margin:"-18px -18px 16px",padding:"20px 18px",color:"white",textAlign:"center"}}>
+          <div style={{fontSize:32,marginBottom:6}}>🏁</div>
+          <div style={{fontSize:18,fontWeight:800}}>{proj.name}</div>
+          <div style={{fontSize:12,opacity:.8,marginTop:3}}>דוח סיכום סופי</div>
+        </div>
+
+        {/* Summary numbers */}
+        <div style={{display:"flex",gap:8,marginBottom:14}}>
+          {[{l:"סה״כ הוצאות",v:`₪${Calc.totalSh.toFixed(0)}`},
+            {l:"סה״כ הפקדות",v:`₪${Calc.totDep.toFixed(0)}`},
+            {l:"יתרה",v:`₪${Calc.envBal.toFixed(0)}`}]
+            .map(x=>(
+              <div key={x.l} style={{flex:1,background:"#fdf3e6",borderRadius:10,padding:"8px",textAlign:"center"}}>
+                <div style={{fontSize:14,fontWeight:800,color:"#c8853a"}}>{x.v}</div>
+                <div style={{fontSize:10,color:"#aaa",marginTop:2}}>{x.l}</div>
+              </div>
+            ))}
+        </div>
+
+        {/* Settlement table */}
+        <div style={{fontSize:13,fontWeight:700,color:"#2c1810",marginBottom:8}}>📊 טבלת איזון</div>
+        {Calc.members.map(m=>{
+          const bal=Calc.mBal(m),pos=bal>=0;
+          return(
+            <div key={m.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+              padding:"10px 12px",borderRadius:10,marginBottom:6,
+              background:pos?"#f0fff4":"#fff5f5",
+              border:`1px solid ${pos?"#c3e6cb":"#fcc"}`}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:"#2c1810"}}>{m.name}</div>
+                <div style={{fontSize:10,color:"#aaa"}}>
+                  הפקיד ₪{Calc.mDep(m).toFixed(0)} · חלק ₪{Calc.mShare(m).toFixed(0)}
+                </div>
+              </div>
+              <div style={{textAlign:"left"}}>
+                <div style={{fontSize:16,fontWeight:800,color:pos?"#27ae60":"#e74c3c"}}>
+                  {pos?"+":""}₪{Math.abs(bal).toFixed(0)}
+                </div>
+                <div style={{fontSize:10,color:pos?"#27ae60":"#e74c3c",fontWeight:600}}>
+                  {pos?"לקבל בחזרה":"להשלים"}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Instructions */}
+        <div style={{...S.card,background:"#f8f8f8",marginTop:4}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#555",marginBottom:6}}>✅ מה לעשות עכשיו</div>
+          {Calc.members.filter(m=>Calc.mBal(m)<0).map(m=>(
+            <div key={m.id} style={{fontSize:12,color:"#e74c3c",marginBottom:4}}>
+              → <strong>{m.name}</strong> צריך להשלים ₪{Math.abs(Calc.mBal(m)).toFixed(0)} לקופה
+            </div>
+          ))}
+          {Calc.members.filter(m=>Calc.mBal(m)>0).map(m=>(
+            <div key={m.id} style={{fontSize:12,color:"#27ae60",marginBottom:4}}>
+              ← <strong>{m.name}</strong> מקבל בחזרה ₪{Calc.mBal(m).toFixed(0)} מהקופה
+            </div>
+          ))}
+          {Calc.members.every(m=>Math.abs(Calc.mBal(m))<1)&&(
+            <div style={{fontSize:12,color:"#27ae60",textAlign:"center"}}>🎉 הקופה מאוזנת לגמרי!</div>
+          )}
+        </div>
+
+        <div style={{fontSize:11,color:"#aaa",textAlign:"center",marginTop:10,marginBottom:8,lineHeight:1.6}}>
+          תודה שהשתמשת בקופה 🙏<br/>המשוב שלך עוזר לנו להשתפר
+        </div>
+        <button onClick={onClose} style={S.pri()}>סגור וסיים 👋</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Refund Modal ──────────────────────────────────────────────
+function RefundModal({members,ref_,setRef,onAdd,onClose,saving,color}){
+  return(
+    <div style={S.ov} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={S.mod}>
+        <div style={{fontSize:15,fontWeight:700,color:"#2c1810",marginBottom:10}}>💵 החזר מזומן</div>
+        <label style={S.lbl}>משתתף מקבל</label>
+        <select value={ref_.memberId} onChange={e=>setRef({...ref_,memberId:e.target.value})} style={S.sel}>
+          <option value="">בחר...</option>
+          {members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        <label style={S.lbl}>סכום ₪</label>
+        <input type="number" value={ref_.amount} onChange={e=>setRef({...ref_,amount:e.target.value})} style={S.inp}/>
+        <label style={S.lbl}>הערה</label>
+        <input value={ref_.note} onChange={e=>setRef({...ref_,note:e.target.value})} style={S.inp}/>
+        <button onClick={onAdd} disabled={saving} style={{...S.pri(),...{background:"#3498db"}}}>{saving?"שומר...":"אשר החזר"}</button>
+        <button onClick={onClose} style={S.gho}>ביטול</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Edit Members Modal ────────────────────────────────────────
+function EditMembersModal({proj,onClose,onSave}){
+  const [members,setMembers]=useState(proj.members.map(m=>({...m})));
+  const [saving,setSaving]=useState(false);
+  const upd=(i,k,v)=>{const n=[...members];n[i]={...n[i],[k]:v};setMembers(n);};
+  return(
+    <div style={S.ov} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={S.mod}>
+        <div style={{fontSize:15,fontWeight:700,color:"#2c1810",marginBottom:12}}>עריכת משתתפים</div>
+        {members.map((m,i)=>(
+          <div key={m.id} style={{background:"#fafafa",borderRadius:10,padding:10,marginBottom:7,border:"1px solid #ede0cc"}}>
+            <div style={S.row}>
+              <input value={m.name} onChange={e=>upd(i,"name",e.target.value)} style={{...S.inp,marginBottom:0,flex:2}}/>
+              <input type="number" min="1" value={m.persons} onChange={e=>upd(i,"persons",parseInt(e.target.value)||1)}
+                style={{...S.inp,marginBottom:0,flex:"0 0 58px",textAlign:"center"}}/>
+              {members.length>1&&<button onClick={()=>setMembers(members.filter((_,j)=>j!==i))} style={{...S.del,color:"#e74c3c"}}>✕</button>}
+            </div>
+          </div>
+        ))}
+        <button onClick={()=>setMembers([...members,{id:"m"+Date.now(),name:"",persons:1}])} style={S.gho}>+ הוסף</button>
+        <button onClick={async()=>{setSaving(true);await onSave(members);setSaving(false);}} disabled={saving} style={S.pri()}>
+          {saving?"שומר...":"שמור ✓"}
+        </button>
+        <button onClick={onClose} style={S.gho}>ביטול</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Analytics Modal ───────────────────────────────────────────
+function AnalyticsModal({projects,onClose}){
+  const all=Object.values(projects);
+  const active=all.filter(p=>p.status==="active");
+  const byType={};
+  all.forEach(p=>{byType[p.type]=(byType[p.type]||0)+1;});
+  const avgDays=all.length?(all.reduce((s,p)=>s+(p.totalDays||0),0)/all.length).toFixed(1):0;
+  const luxVals=all.map(p=>parseInt(p.questionnaire?.["רמת פנסיוניות (1-5)"])||0).filter(Boolean);
+  const avgLux=luxVals.length?(luxVals.reduce((s,v)=>s+v,0)/luxVals.length).toFixed(1):"—";
+  const purposes={};
+  all.forEach(p=>{const v=p.questionnaire?.["מטרת האירוע"];if(v)purposes[v]=(purposes[v]||0)+1;});
+  const locations={};
+  all.forEach(p=>{const v=p.questionnaire?.["יעד גיאוגרפי"];if(v)locations[v]=(locations[v]||0)+1;});
+
+  // Feedback averages
+  const withFeedback=all.filter(p=>p.feedback);
+  const fbAvg=key=>{
+    const vals=withFeedback.map(p=>p.feedback[key]).filter(v=>v&&!isNaN(v));
+    return vals.length?(vals.reduce((s,v)=>s+ +v,0)/vals.length).toFixed(1):"—";
+  };
+
+  return(
+    <div style={S.ov} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={S.mod}>
+        <div style={{fontSize:16,fontWeight:700,color:"#2c1810",marginBottom:14}}>📊 ניתוח נתונים</div>
+
+        <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}}>
+          {[{l:"כלל הפרויקטים",v:all.length,c:"#c8853a"},
+            {l:"פעילים",v:active.length,c:"#27ae60"},
+            {l:"ממוצע ימים",v:avgDays,c:"#2980b9"},
+            {l:"פנסיוניות ממוצעת",v:avgLux,c:"#8e44ad"}]
+            .map(x=>(
+            <div key={x.l} style={{flex:"0 0 calc(50% - 4px)",background:"white",borderRadius:10,padding:"10px",textAlign:"center",border:`2px solid ${x.c}22`}}>
+              <div style={{fontSize:22,fontWeight:800,color:x.c}}>{x.v}</div>
+              <div style={{fontSize:10,color:"#aaa",marginTop:2}}>{x.l}</div>
+            </div>
+          ))}
+        </div>
+
+        {Object.keys(byType).length>0&&<>
+          <div style={{fontSize:12,fontWeight:700,color:"#555",marginBottom:7}}>לפי סוג פרויקט</div>
+          {Object.entries(byType).map(([k,v])=>(
+            <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+              <span style={{fontSize:12,color:"#666"}}>{PROJ_TYPES[k]?.label||k}</span>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <div style={{width:Math.max(8,v*20),height:8,background:PROJ_TYPES[k]?.color||"#888",borderRadius:4}}/>
+                <span style={{fontSize:12,fontWeight:700,color:PROJ_TYPES[k]?.color||"#888"}}>{v}</span>
+              </div>
+            </div>
+          ))}
+        </>}
+
+        {Object.keys(purposes).length>0&&<>
+          <div style={{fontSize:12,fontWeight:700,color:"#555",marginBottom:7,marginTop:12}}>לפי מטרה</div>
+          {Object.entries(purposes).map(([k,v])=>(
+            <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4,color:"#666"}}>
+              <span>{k}</span><span style={{fontWeight:700,color:"#c8853a"}}>{v}</span>
+            </div>
+          ))}
+        </>}
+
+        {withFeedback.length>0&&<>
+          <div style={{fontSize:12,fontWeight:700,color:"#555",marginBottom:7,marginTop:12}}>
+            📝 ממוצעי משוב ({withFeedback.length} פרויקטים)
+          </div>
+          {[["חוויה כללית","overall"],["קלות שימוש","ease"],["בהירות חישובים","clarity"],["ימליץ לאחרים","recommend"]]
+            .map(([l,k])=>{
+              const v=fbAvg(k);
+              return(
+                <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{fontSize:12,color:"#666"}}>{l}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    <span style={{fontSize:12,fontWeight:700,color:"#c8853a"}}>{v}</span>
+                    <span style={{fontSize:11,color:"#aaa"}}>/5</span>
+                  </div>
+                </div>
+              );
+            })}
+          <div style={{fontSize:12,fontWeight:700,color:"#555",marginBottom:7,marginTop:8}}>תגובות פתוחות — חסר:</div>
+          {withFeedback.filter(p=>p.feedback?.missing).map(p=>(
+            <div key={p.id} style={{background:"#f8f8f8",borderRadius:8,padding:"7px 10px",marginBottom:5,fontSize:11,color:"#555",fontStyle:"italic"}}>
+              "{p.feedback.missing}"
+            </div>
+          ))}
+        </>}
+
+        <button onClick={onClose} style={{...S.gho,marginTop:10}}>סגור</button>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
